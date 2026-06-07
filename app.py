@@ -1,11 +1,12 @@
 # app.py — Market Data Agentic AI
-# Main agent: llama3.2:3b  (reasoning + analysis)
-# Coding agent: qwen2.5-coder:7b  (writes missing tools on demand)
+# Main agent:   llama3.2:3b       — reasoning, planning, analysis
+# Spec writer:  llama3.2:3b       — converts user query → technical spec for coder
+# Coding agent: qwen2.5-coder:7b  — writes missing tool functions from spec
 
 import json
 import ollama
 
-from config import MAIN_MODEL
+from config import MAIN_MODEL, CODER_MODEL
 from prompts import SYSTEM_PROMPT
 from utils import TOOLS
 from coding_agent import coding_agent
@@ -14,8 +15,8 @@ from coding_agent import coding_agent
 def run_agent():
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    print(f"Market Agent ready  [{MAIN_MODEL}]")
-    print(f"Coding Agent ready  [qwen2.5-coder:7b]")
+    print(f"Market Agent ready   [{MAIN_MODEL}]")
+    print(f"Coding Agent ready   [{CODER_MODEL}]")
     print("Type 'exit' to quit.\n")
 
     while True:
@@ -58,17 +59,16 @@ def run_agent():
                     print(f"  [action] {fn_name}({fn_input})")
 
                     if fn_name in TOOLS:
-                        # Known tool — run directly
                         try:
                             observation = TOOLS[fn_name](fn_input)
                         except Exception as e:
                             observation = f"Tool error: {e}"
                     else:
-                        # Unknown tool — hand off to coding agent
+                        # Pass original user_query so spec generator has full context
                         observation = coding_agent(
                             missing_tool=fn_name,
                             fn_input=fn_input,
-                            context=f"User asked: {query}"
+                            user_query=query        # ← clean user query, not wrapped context string
                         )
 
                     print(f"  [observe] {str(observation)[:120]}...")
