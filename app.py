@@ -1,21 +1,22 @@
-# agent.py — Market Data Agentic AI (ReAct loop, Binance tools, Ollama)
+# app.py — Market Data Agentic AI
+# Main agent: llama3.2:3b  (reasoning + analysis)
+# Coding agent: qwen2.5-coder:7b  (writes missing tools on demand)
 
 import json
 import ollama
 
-
-
-
-
-# =========================================================================
-# Agent loop
-# =========================================================================
+from config import MAIN_MODEL
 from prompts import SYSTEM_PROMPT
 from utils import TOOLS
+from coding_agent import coding_agent
+
+
 def run_agent():
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    print("Market Agent ready. Type 'exit' to quit.\n")
+    print(f"Market Agent ready  [{MAIN_MODEL}]")
+    print(f"Coding Agent ready  [qwen2.5-coder:7b]")
+    print("Type 'exit' to quit.\n")
 
     while True:
         try:
@@ -32,7 +33,7 @@ def run_agent():
 
             while True:
                 response = ollama.chat(
-                    model="llama3.2:3b",
+                    model=MAIN_MODEL,
                     messages=messages,
                     format="json"
                 )
@@ -52,28 +53,33 @@ def run_agent():
 
                 elif call.get("type") == "action":
                     fn_name  = call.get("function")
-                    fn_input = call.get("input")
+                    fn_input = call.get("input", "")
 
                     print(f"  [action] {fn_name}({fn_input})")
 
                     if fn_name in TOOLS:
+                        # Known tool — run directly
                         try:
                             observation = TOOLS[fn_name](fn_input)
                         except Exception as e:
                             observation = f"Tool error: {e}"
-
-                        print(f"  [observe] {observation[:120]}...")
-
-                        messages.append({
-                            "role": "user",
-                            "content": json.dumps({
-                                "type": "observation",
-                                "observation": observation
-                            })
-                        })
                     else:
-                        print(f"Agent Error: unknown tool '{fn_name}'")
-                        break
+                        # Unknown tool — hand off to coding agent
+                        observation = coding_agent(
+                            missing_tool=fn_name,
+                            fn_input=fn_input,
+                            context=f"User asked: {query}"
+                        )
+
+                    print(f"  [observe] {str(observation)[:120]}...")
+
+                    messages.append({
+                        "role": "user",
+                        "content": json.dumps({
+                            "type": "observation",
+                            "observation": observation
+                        })
+                    })
 
                 elif call.get("type") == "plan":
                     print(f"  [plan] {call.get('plan')}")
