@@ -1,0 +1,222 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "description": "Canonical function/tool registry for tradeAI. Before creating any new function, check this registry. Reuse existing entries wherever possible.",
+    "last_updated": "2026-06-09"
+  },
+
+  "constants": {
+    "BINANCE_BASE": {
+      "value": "https://api.binance.com/api/v3",
+      "purpose": "Root URL for all Binance REST API v3 calls",
+      "defined_in": "constants.py",
+      "used_by": ["get_price", "get_ohlcv", "get_orderbook", "get_24h_stats",
+                  "calculate_sma", "calculate_ema", "calculate_rsi",
+                  "detect_trend", "check_volume_spike"]
+    },
+    "SUPPORTED_SYMBOLS": {
+      "value": ["BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","DOGEUSDT","ADAUSDT"],
+      "purpose": "Commonly used Binance spot trading pairs (not exhaustive)",
+      "defined_in": "prompts.py (reference only)"
+    },
+    "SUPPORTED_INTERVALS": {
+      "value": ["1m","3m","5m","15m","30m","1h","2h","4h","1d"],
+      "purpose": "Valid Binance kline interval strings",
+      "defined_in": "prompts.py (reference only)"
+    }
+  },
+
+  "tools": {
+    "get_price": {
+      "name": "get_price",
+      "defined_in": "utils.py",
+      "purpose": "Fetch the current spot price of a trading pair from Binance",
+      "reasoning": "Provides a fast, single-call snapshot of current price without fetching full OHLCV data. Use this whenever only the latest price is needed.",
+      "inputs": {
+        "symbol": "str — Binance trading pair, e.g. 'BTCUSDT'"
+      },
+      "outputs": "str — formatted string: '{SYMBOL} price: {price:.4f} USDT'",
+      "dependencies": ["requests", "BINANCE_BASE", "/ticker/price endpoint"],
+      "do_not_duplicate_for": ["checking if price rose or fell", "comparing to SMA/EMA"],
+      "examples": [
+        "get_price('BTCUSDT')  # → 'BTCUSDT price: 67432.1200 USDT'",
+        "get_price('ethusdt')  # symbol is auto-uppercased"
+      ]
+    },
+
+    "get_ohlcv": {
+      "name": "get_ohlcv",
+      "defined_in": "utils.py",
+      "purpose": "Fetch recent OHLCV (Open/High/Low/Close/Volume) candlestick data",
+      "reasoning": "Raw candle data is the source of truth for most indicator calculations and visual analysis. Use this when you need raw candle access rather than a derived indicator.",
+      "inputs": {
+        "args": "str — comma-separated: 'SYMBOL,INTERVAL,LIMIT'  e.g. 'BTCUSDT,5m,10'"
+      },
+      "outputs": "str — multi-line formatted OHLCV table",
+      "dependencies": ["requests", "BINANCE_BASE", "/klines endpoint"],
+      "do_not_duplicate_for": ["RSI calculation (use calculate_rsi)", "SMA (use calculate_sma)", "EMA (use calculate_ema)", "trend (use detect_trend)"],
+      "examples": [
+        "get_ohlcv('BTCUSDT,5m,10')   # last 10 x 5m candles",
+        "get_ohlcv('ETHUSDT,1h,5')    # last 5 x 1h candles"
+      ]
+    },
+
+    "get_orderbook": {
+      "name": "get_orderbook",
+      "defined_in": "utils.py",
+      "purpose": "Retrieve top N bid/ask levels from the Binance order book",
+      "reasoning": "Order book depth reveals supply/demand walls and market microstructure. Use this for liquidity analysis, identifying support/resistance walls, or assessing slippage risk.",
+      "inputs": {
+        "args": "str — comma-separated: 'SYMBOL,DEPTH'  e.g. 'BTCUSDT,5'"
+      },
+      "outputs": "str — formatted bid/ask ladder, asks reversed (best ask on top)",
+      "dependencies": ["requests", "BINANCE_BASE", "/depth endpoint"],
+      "do_not_duplicate_for": ["bid-ask spread analysis", "wall detection"],
+      "examples": [
+        "get_orderbook('BTCUSDT,5')    # top 5 levels",
+        "get_orderbook('SOLUSDT,10')   # top 10 levels"
+      ]
+    },
+
+    "get_24h_stats": {
+      "name": "get_24h_stats",
+      "defined_in": "utils.py",
+      "purpose": "Get 24-hour rolling statistics: open, close, high, low, % change, volume",
+      "reasoning": "Consolidates the most commonly requested daily summary metrics in one call. Use instead of calling get_price + get_ohlcv separately when only daily-level overview is needed.",
+      "inputs": {
+        "symbol": "str — Binance trading pair, e.g. 'BTCUSDT'"
+      },
+      "outputs": "str — formatted 24h stats block with open/close/high/low/change%/volume",
+      "dependencies": ["requests", "BINANCE_BASE", "/ticker/24hr endpoint"],
+      "do_not_duplicate_for": ["daily change %", "24h high/low lookup", "volume overview"],
+      "examples": [
+        "get_24h_stats('BTCUSDT')",
+        "get_24h_stats('BNBUSDT')"
+      ]
+    },
+
+    "calculate_sma": {
+      "name": "calculate_sma",
+      "defined_in": "utils.py",
+      "purpose": "Calculate Simple Moving Average and compare current price to it",
+      "reasoning": "SMA smooths price action to identify mean price level and bias. Use to determine whether price is extended above/below a rolling mean. Do NOT write a new averaging function — call this.",
+      "inputs": {
+        "args": "str — comma-separated: 'SYMBOL,PERIOD,INTERVAL'  e.g. 'BTCUSDT,20,1m'"
+      },
+      "outputs": "str — SMA value + whether current price is above or below it",
+      "dependencies": ["requests", "BINANCE_BASE", "/klines endpoint"],
+      "do_not_duplicate_for": ["rolling average of closes", "price vs mean comparison"],
+      "examples": [
+        "calculate_sma('BTCUSDT,20,1m')",
+        "calculate_sma('ETHUSDT,50,1h')"
+      ]
+    },
+
+    "calculate_ema": {
+      "name": "calculate_ema",
+      "defined_in": "utils.py",
+      "purpose": "Calculate fast and slow Exponential Moving Averages and emit crossover signal",
+      "reasoning": "EMA gives more weight to recent prices than SMA. The fast/slow crossover is a standard trend-entry signal. Use this instead of computing EMA from scratch.",
+      "inputs": {
+        "args": "str — comma-separated: 'SYMBOL,FAST_PERIOD,SLOW_PERIOD,INTERVAL'  e.g. 'BTCUSDT,9,21,1h'"
+      },
+      "outputs": "str — EMA(fast), EMA(slow) values + BULLISH/BEARISH crossover signal",
+      "dependencies": ["requests", "BINANCE_BASE", "/klines endpoint"],
+      "internal_helper": "ema(prices, period) — closure inside calculate_ema, not exported",
+      "do_not_duplicate_for": ["EMA computation", "golden cross / death cross detection"],
+      "examples": [
+        "calculate_ema('BTCUSDT,9,21,1h')   # standard momentum setup",
+        "calculate_ema('SOLUSDT,12,26,4h')  # MACD-style periods"
+      ]
+    },
+
+    "calculate_rsi": {
+      "name": "calculate_rsi",
+      "defined_in": "utils.py",
+      "purpose": "Calculate Relative Strength Index (RSI) with overbought/oversold zone labels",
+      "reasoning": "RSI is the canonical momentum oscillator for overbought (>70) / oversold (<30) detection. Always use this function — never write a new gain/loss averaging loop for the same purpose.",
+      "inputs": {
+        "args": "str — comma-separated: 'SYMBOL,PERIOD,INTERVAL'  e.g. 'BTCUSDT,14,1h'"
+      },
+      "outputs": "str — RSI value + zone label (OVERBOUGHT / OVERSOLD / NEUTRAL)",
+      "dependencies": ["requests", "BINANCE_BASE", "/klines endpoint"],
+      "do_not_duplicate_for": ["momentum check", "overbought/oversold determination", "reversal signal"],
+      "examples": [
+        "calculate_rsi('BTCUSDT,14,1h')",
+        "calculate_rsi('ETHUSDT,14,4h')"
+      ]
+    },
+
+    "detect_trend": {
+      "name": "detect_trend",
+      "defined_in": "utils.py",
+      "purpose": "Detect market trend (UPTREND / DOWNTREND / SIDEWAYS) via higher-highs / lower-lows over recent candles",
+      "reasoning": "Provides a structural trend label without requiring indicator overlap. Use as the first check before entering any directional trade. Do not write custom HH/LL loops — use this.",
+      "inputs": {
+        "args": "str — comma-separated: 'SYMBOL,LOOKBACK,INTERVAL'  e.g. 'BTCUSDT,20,1h'"
+      },
+      "outputs": "str — trend label + recent close price",
+      "dependencies": ["requests", "BINANCE_BASE", "/klines endpoint"],
+      "do_not_duplicate_for": ["higher-highs/lower-lows check", "trend direction label", "consolidation detection"],
+      "examples": [
+        "detect_trend('BTCUSDT,20,1h')",
+        "detect_trend('SOLUSDT,30,4h')"
+      ]
+    },
+
+    "check_volume_spike": {
+      "name": "check_volume_spike",
+      "defined_in": "utils.py",
+      "purpose": "Detect abnormal volume relative to a rolling average (spike ≥ 2x, elevated ≥ 1.5x)",
+      "reasoning": "Volume confirms price moves. A spike without a price break is a warning; a spike with a breakout is confirmation. Use this function — never write a new volume ratio calculation.",
+      "inputs": {
+        "args": "str — comma-separated: 'SYMBOL,LOOKBACK,INTERVAL'  e.g. 'BTCUSDT,20,1h'"
+      },
+      "outputs": "str — current vol, avg vol, and verdict (SPIKE / ELEVATED / NORMAL)",
+      "dependencies": ["requests", "BINANCE_BASE", "/klines endpoint"],
+      "do_not_duplicate_for": ["volume ratio computation", "spike/elevated/normal labeling"],
+      "examples": [
+        "check_volume_spike('BTCUSDT,20,1h')",
+        "check_volume_spike('ETHUSDT,10,15m')"
+      ]
+    }
+  },
+
+  "agent": {
+    "run_agent": {
+      "name": "run_agent",
+      "defined_in": "app.py",
+      "purpose": "Main ReAct agent loop — takes user input, calls Ollama LLM, dispatches tool actions, loops until output state",
+      "reasoning": "Orchestrates the full START→PLAN→ACTION→OBSERVATION→OUTPUT cycle. All tool dispatch goes through TOOLS dict — do not add ad-hoc function calls outside this loop.",
+      "inputs": "none (reads from stdin interactively)",
+      "outputs": "none (prints to stdout)",
+      "dependencies": ["ollama", "json", "TOOLS dict from utils.py", "SYSTEM_PROMPT from prompts.py"],
+      "llm_model": "llama3.2:3b",
+      "state_machine": {
+        "user": "initial user query",
+        "plan": "LLM reasoning step (printed, not fed back)",
+        "action": "tool call — dispatched via TOOLS[fn_name](fn_input)",
+        "observation": "tool result — fed back into messages",
+        "output": "final answer — printed to user, loop breaks"
+      }
+    }
+  },
+
+  "registry_usage_rules": {
+    "before_creating_a_new_function": [
+      "1. Search this registry by purpose keywords.",
+      "2. If an equivalent exists — REUSE it, even if the parameter format differs slightly.",
+      "3. If partial overlap — extend the existing function rather than duplicating.",
+      "4. Only if no overlap exists — create a new entry, use it, then ADD it here."
+    ],
+    "before_defining_a_constant": [
+      "Check the 'constants' block. BINANCE_BASE is already defined in constants.py — import it, never redefine it."
+    ],
+    "anti_patterns": [
+      "Writing a new RSI loop when calculate_rsi() exists",
+      "Hardcoding 'https://api.binance.com/api/v3' instead of importing BINANCE_BASE",
+      "Computing a rolling average of closes instead of calling calculate_sma()",
+      "Fetching raw klines and doing gain/loss math instead of calling calculate_rsi()"
+    ]
+  }
+}

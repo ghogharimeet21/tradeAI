@@ -273,17 +273,23 @@ def coding_agent(missing_tool: str, fn_input: str, user_query: str = "") -> str:
     spec["function_name"] = missing_tool
 
     # ── Step 2: Build focused prompt for qwen ────────────────────────────
+    # Use .get() with fallbacks — spec may be partial if llama returned incomplete JSON
+    fn_name_spec  = spec.get("function_name", missing_tool)
+    purpose       = spec.get("purpose",  f"Implement {missing_tool.replace('_', ' ')}")
+    inputs        = spec.get("inputs",   fn_input)
+    expected_out  = spec.get("output",   "human-readable string with the result")
+
     user_message = f"""Write a Python function with this exact specification:
 
-Function name: {spec['function_name']}
-Purpose: {spec['purpose']}
-Input format: {spec['inputs']}
-Expected output: {spec['output']}
+Function name: {fn_name_spec}
+Purpose: {purpose}
+Input format: {inputs}
+Expected output: {expected_out}
 
 The function will be called with: "{fn_input}"
 
 Follow the working pattern in your instructions exactly.
-function_name in your JSON must be: {spec['function_name']}
+function_name in your JSON must be: {fn_name_spec}
 """
 
     messages = [

@@ -1,23 +1,29 @@
-# app.py — Market Data Agentic AI
-# Main agent:   llama3.2:3b       — reasoning, planning, analysis
-# Spec writer:  llama3.2:3b       — converts user query → technical spec for coder
-# Coding agent: qwen2.5-coder:7b  — writes missing tool functions from spec
+# agent.py — Market Data Agentic AI (ReAct loop, Binance tools, Ollama)
+#
+# ⚠  TOOL REGISTRY — before adding new tools or analysis functions:
+#   1. python registry.py find "<intent>"      — check if it exists
+#   2. python registry.py summary              — see all registered tools
+#   3. If absent: add to utils.py + call registry.add_tool(...)
 
 import json
 import ollama
 
-from config import MAIN_MODEL, CODER_MODEL
+
+
+
+
+# =========================================================================
+# Agent loop
+# =========================================================================
 from prompts import SYSTEM_PROMPT
 from utils import TOOLS
-from coding_agent import coding_agent
-
+import registry as reg
 
 def run_agent():
+    reg.print_summary()          # show registered tools on every startup
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    print(f"Market Agent ready   [{MAIN_MODEL}]")
-    print(f"Coding Agent ready   [{CODER_MODEL}]")
-    print("Type 'exit' to quit.\n")
+    print("Market Agent ready. Type 'exit' to quit.\n")
 
     while True:
         try:
@@ -34,7 +40,7 @@ def run_agent():
 
             while True:
                 response = ollama.chat(
-                    model=MAIN_MODEL,
+                    model="llama3.2:3b",
                     messages=messages,
                     format="json"
                 )
@@ -54,7 +60,7 @@ def run_agent():
 
                 elif call.get("type") == "action":
                     fn_name  = call.get("function")
-                    fn_input = call.get("input", "")
+                    fn_input = call.get("input")
 
                     print(f"  [action] {fn_name}({fn_input})")
 
@@ -63,23 +69,19 @@ def run_agent():
                             observation = TOOLS[fn_name](fn_input)
                         except Exception as e:
                             observation = f"Tool error: {e}"
-                    else:
-                        # Pass original user_query so spec generator has full context
-                        observation = coding_agent(
-                            missing_tool=fn_name,
-                            fn_input=fn_input,
-                            user_query=query        # ← clean user query, not wrapped context string
-                        )
 
-                    print(f"  [observe] {str(observation)[:120]}...")
+                        print(f"  [observe] {observation[:120]}...")
 
-                    messages.append({
-                        "role": "user",
-                        "content": json.dumps({
-                            "type": "observation",
-                            "observation": observation
+                        messages.append({
+                            "role": "user",
+                            "content": json.dumps({
+                                "type": "observation",
+                                "observation": observation
+                            })
                         })
-                    })
+                    else:
+                        print(f"Agent Error: unknown tool '{fn_name}'")
+                        break
 
                 elif call.get("type") == "plan":
                     print(f"  [plan] {call.get('plan')}")

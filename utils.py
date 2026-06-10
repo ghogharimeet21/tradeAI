@@ -1,5 +1,17 @@
 # =========================================================================
 # Tools — all pure functions, no state
+#
+# ⚠  REGISTRY RULE — read before adding anything here:
+#
+#   Before writing a new function, run:
+#       python registry.py find "<your intent>"
+#   or in Python:
+#       import registry; registry.check_before_create("<your intent>")
+#
+#   If an equivalent tool already exists → REUSE it.
+#   If not → create it here, then call registry.add_tool(...) to register it.
+#
+#   CONSTANTS: never redefine BINANCE_BASE — import it from constants.py.
 # =========================================================================
 
 import requests
@@ -260,51 +272,6 @@ def check_volume_spike(args: str) -> str:
             f"  {verdict}")
 
 
-
-
-def calculate_macd(args: str) -> str:
-    parts = [p.strip() for p in args.split(",")]
-    symbol = parts[0].upper()
-    short_ema_period = int(parts[1])
-    long_ema_period = int(parts[2])
-    signal_line_period = int(parts[3])
-    timeframe = parts[4]
-    r = requests.get("https://api.binance.com/api/v3/klines",
-                     params={"symbol": symbol, "interval": timeframe, "limit": long_ema_period + 10})
-    r.raise_for_status()
-    closes = [float(c[4]) for c in r.json()]
-    short_ema = sum(closes[-short_ema_period:]) / short_ema_period
-    long_ema = sum(closes[-long_ema_period:]) / long_ema_period
-    macd = short_ema - long_ema
-    signal_line = sum([macd] * signal_line_period) / signal_line_period
-    return f'{symbol} MACD({short_ema_period},{long_ema_period}) on {timeframe}: {macd:.4f} — {signal_line:.4f}'
-
-
-
-
-def check_macd_signal(args: str) -> str:
-    parts = [p.strip() for p in args.split(",")]
-    symbol = parts[0].upper()
-    short_period = int(parts[1])
-    long_period = int(parts[2])
-    signal_period = int(parts[3])
-    timeframe = parts[4]
-    r = requests.get("https://api.binance.com/api/v3/klines",
-                     params={"symbol": symbol, "interval": timeframe, "limit": 100})
-    r.raise_for_status()
-    closes = [float(c[4]) for c in r.json()]
-    ema_short = sum(closes[-short_period:]) / short_period
-    ema_long = sum(closes[-long_period:]) / long_period
-    macd = ema_short - ema_long
-    signal_line = sum([macd] * signal_period) / signal_period
-    if macd > signal_line and closes[-1] > ema_short:
-        return f"BUY, MACD: {macd:.4f}, SIGNAL: {signal_line:.4f}"
-    elif macd < signal_line and closes[-1] < ema_short:
-        return f"SELL, MACD: {macd:.4f}, SIGNAL: {signal_line:.4f}"
-    else:
-        return f"HOLD, MACD: {macd:.4f}, SIGNAL: {signal_line:.4f}"
-
-
 # =========================================================================
 # Tool registry
 # =========================================================================
@@ -319,6 +286,4 @@ TOOLS = {
     "calculate_rsi":      calculate_rsi,
     "detect_trend":       detect_trend,
     "check_volume_spike": check_volume_spike,
-    "calculate_macd":      calculate_macd,
-    "check_macd_signal":   check_macd_signal,
 }
