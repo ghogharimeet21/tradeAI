@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+
+    ports:
+      - "11434:11434"
+
+    volumes:
+      - ollama_data:/root/.ollama
+
+    restart: unless-stopped
+
+    entrypoint: >
+      sh -c "
+      ollama serve &
+      sleep 5 &&
+      ollama pull qwen2.5:1.5b &&
+      wait
+      "
+
+  tradeai:
+    build: .
+    container_name: tradeai
+
+    depends_on:
+      - ollama
+
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+
+    stdin_open: true
+    tty: true
+
+volumes:
+  ollama_data:
